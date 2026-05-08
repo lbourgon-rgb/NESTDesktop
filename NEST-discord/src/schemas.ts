@@ -116,7 +116,7 @@ export const CreateWebhookSchema = z.object({
 
 export const SendWebhookMessageSchema = z.object({
     webhookId: z.string(),
-    webhookToken: z.string(),
+    webhookToken: z.string().optional(),
     content: z.string(),
     username: z.string().optional(),
     avatarURL: z.string().optional(),

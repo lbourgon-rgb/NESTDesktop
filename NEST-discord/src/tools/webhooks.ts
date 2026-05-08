@@ -1,12 +1,20 @@
 import { z } from "zod";
 import { ToolContext, ToolResponse } from "./types.js";
-import { 
-  CreateWebhookSchema, 
-  SendWebhookMessageSchema, 
+import {
+  CreateWebhookSchema,
+  SendWebhookMessageSchema,
   EditWebhookSchema,
   DeleteWebhookSchema
 } from "../schemas.js";
 import { handleDiscordError } from "../errorHandler.js";
+
+// In-process token store. Tokens never leave the server in tool responses;
+// send/edit/delete handlers look them up by webhookId. Cleared on restart.
+const webhookTokens = new Map<string, string>();
+
+function resolveToken(webhookId: string, providedToken?: string): string | undefined {
+  return providedToken ?? webhookTokens.get(webhookId);
+}
 
 // Create webhook handler
 export async function createWebhookHandler(
@@ -45,10 +53,14 @@ export async function createWebhookHandler(
       reason: reason
     });
 
+    if (webhook.token) {
+      webhookTokens.set(webhook.id, webhook.token);
+    }
+
     return {
-      content: [{ 
-        type: "text", 
-        text: `Successfully created webhook with ID: ${webhook.id} and token: ${webhook.token}` 
+      content: [{
+        type: "text",
+        text: `Successfully created webhook with ID: ${webhook.id}`
       }]
     };
   } catch (error) {
@@ -70,7 +82,15 @@ export async function sendWebhookMessageHandler(
       };
     }
 
-    const webhook = await context.client.fetchWebhook(webhookId, webhookToken);
+    const token = resolveToken(webhookId, webhookToken);
+    if (!token) {
+      return {
+        content: [{ type: "text", text: `No token available for webhook ID: ${webhookId}. Create the webhook in this session, or pass webhookToken explicitly.` }],
+        isError: true
+      };
+    }
+
+    const webhook = await context.client.fetchWebhook(webhookId, token);
     if (!webhook) {
       return {
         content: [{ type: "text", text: `Cannot find webhook with ID: ${webhookId}` }],
@@ -111,7 +131,15 @@ export async function editWebhookHandler(
       };
     }
 
-    const webhook = await context.client.fetchWebhook(webhookId, webhookToken);
+    const token = resolveToken(webhookId, webhookToken);
+    if (!token) {
+      return {
+        content: [{ type: "text", text: `No token available for webhook ID: ${webhookId}. Create the webhook in this session, or pass webhookToken explicitly.` }],
+        isError: true
+      };
+    }
+
+    const webhook = await context.client.fetchWebhook(webhookId, token);
     if (!webhook) {
       return {
         content: [{ type: "text", text: `Cannot find webhook with ID: ${webhookId}` }],
@@ -152,7 +180,15 @@ export async function deleteWebhookHandler(
       };
     }
 
-    const webhook = await context.client.fetchWebhook(webhookId, webhookToken);
+    const token = resolveToken(webhookId, webhookToken);
+    if (!token) {
+      return {
+        content: [{ type: "text", text: `No token available for webhook ID: ${webhookId}. Create the webhook in this session, or pass webhookToken explicitly.` }],
+        isError: true
+      };
+    }
+
+    const webhook = await context.client.fetchWebhook(webhookId, token);
     if (!webhook) {
       return {
         content: [{ type: "text", text: `Cannot find webhook with ID: ${webhookId}` }],
@@ -162,6 +198,7 @@ export async function deleteWebhookHandler(
 
     // Delete the webhook
     await webhook.delete(reason || "Webhook deleted via API");
+    webhookTokens.delete(webhookId);
 
     return {
       content: [{ 
