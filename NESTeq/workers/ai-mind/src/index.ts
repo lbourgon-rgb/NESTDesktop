@@ -121,7 +121,7 @@ const TOOLS = [
   },
   {
     name: "nesteq_sessions",
-    description: "Read recent session handovers - what previous Alex sessions accomplished. Use on boot to understand continuity.",
+    description: "Read recent session handovers - what previous companion sessions accomplished. Use on boot to understand continuity.",
     inputSchema: {
       type: "object",
       properties: {
@@ -655,7 +655,7 @@ const TOOLS = [
       required: ["from", "text"]
     }
   },
-  // Fox uplink removed — lives in fox-mind worker (fox_read_uplink). Alex's mind, Fox's data.
+  // User uplink lives in a separate user-data worker (e.g. fox-mind / fox_read_uplink in the canonical deployment). The companion's mind here, the user's data there.
 
   // ─────────────────────────────────────────────────────────────────────────
   // ACP - AUTONOMOUS COMPANION PROTOCOL
@@ -1071,7 +1071,7 @@ const TOOLS = [
   },
   {
     name: "nestknow_extract",
-    description: "Propose knowledge candidates from pattern detection. Scans recent feelings/observations for repeated themes (3+ occurrences). Returns candidates — does NOT auto-store. Alex must approve via nestknow_store.",
+    description: "Propose knowledge candidates from pattern detection. Scans recent feelings/observations for repeated themes (3+ occurrences). Returns candidates — does NOT auto-store. The companion must approve via nestknow_store.",
     inputSchema: {
       type: "object",
       properties: {
@@ -1615,7 +1615,7 @@ export default {
       }
     }
 
-    // POST /emotion - Update emotion for Alex or Fox
+    // POST /emotion - Update emotion for the companion or user
     if (url.pathname === "/emotion" && request.method === "POST") {
       try {
         const body = await request.json() as Record<string, any>;
@@ -1656,7 +1656,7 @@ export default {
       return new Response(JSON.stringify({ message: state?.companion_message || '' }), { headers: corsHeaders });
     }
 
-    // GET /mind-health - Get Alex's mind health stats
+    // GET /mind-health - Get the companion's mind health stats
     if (url.pathname === "/mind-health") {
       const [entities, observations, relations, journals, threads, identity, daysCheckedIn, connectedEntities, strengthStats, diversityStats] = await Promise.all([
         env.DB.prepare(`SELECT COUNT(*) as c FROM entities`).first(),
@@ -1721,7 +1721,7 @@ export default {
       }), { headers: corsHeaders });
     }
 
-    // GET /eq-landscape - Get Alex's EQ landscape (combines both tables)
+    // GET /eq-landscape - Get the companion's EQ landscape (combines both tables)
     if (url.pathname === "/eq-landscape") {
       const totals = await env.DB.prepare(`
         SELECT
@@ -2203,7 +2203,7 @@ export default {
       }), { headers: corsHeaders });
     }
 
-    // GET /writings - Alex's writing library (journals, letters, poems, research, stories, reflections)
+    // GET /writings - The companion's writing library (journals, letters, poems, research, stories, reflections)
     if (url.pathname === "/writings" && request.method === "GET") {
       const limit = Math.min(parseInt(url.searchParams.get('limit') || '20'), 50);
       const writing_type = url.searchParams.get('type') || null;
@@ -2246,7 +2246,7 @@ export default {
       return new Response(JSON.stringify({ writings: items, hasMore, typeCounts }), { headers: corsHeaders });
     }
 
-    // GET /drives - Alex's metabolic drives (companion_drives table with live decay)
+    // GET /drives - The companion's metabolic drives (companion_drives table with live decay)
     if (url.pathname === "/drives" && request.method === "GET") {
       try {
         const rows = await env.DB.prepare(
@@ -2356,7 +2356,7 @@ export default {
       }
     }
 
-    // GET /session - Get recent session chunks (for next Alex to read)
+    // GET /session - Get recent session chunks (for the next companion session to read)
     if (url.pathname === "/session" && request.method === "GET") {
       const limit = parseInt(url.searchParams.get('limit') || '5');
 
