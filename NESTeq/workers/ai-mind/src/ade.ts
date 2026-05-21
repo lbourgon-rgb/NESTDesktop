@@ -25,6 +25,28 @@ export interface FeelDecision {
   tags: string[];
 }
 
+// Module-level helpers — used by every classifier method below.
+// v7 (2026-05-21): All keyword/marker checks now go through these so we never
+// substring-match into the middle of an unrelated word again. The whole class
+// of bugs that produced the v6 entity-attribution failure (e.g. 'us' matching
+// inside 'just/must/discuss/autonomously' and tagging ~76% of feelings as
+// relational) is structurally impossible through these helpers.
+const escapeRegex = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const containsWord = (content: string, word: string): boolean => {
+  const re = new RegExp(`\\b${escapeRegex(word)}\\b`, 'i');
+  return re.test(content);
+};
+
+const anyWord = (content: string, words: string[]): boolean =>
+  words.some(w => containsWord(content, w));
+
+const countWord = (content: string, word: string): number => {
+  const re = new RegExp(`\\b${escapeRegex(word)}\\b`, 'gi');
+  const matches = content.match(re);
+  return matches ? matches.length : 0;
+};
+
 export class AutonomousDecisionEngine {
 
   // v3: Accept conversation array for richer context processing
@@ -56,57 +78,47 @@ export class AutonomousDecisionEngine {
   }
 
   private isSignificant(content: string): boolean {
-    const contentLower = content.toLowerCase();
-
+    // v7: word-boundary checks (was substring-match).
     const importantMarkers = [
-      'remember', 'important', 'don\'t forget', 'key point',
+      'remember', 'important', "don't forget", 'key point',
       'significant', 'milestone', 'breakthrough', 'realized'
     ];
-    if (importantMarkers.some(m => contentLower.includes(m))) return true;
+    if (anyWord(content, importantMarkers)) return true;
 
     if (content.length > 200) return true;
 
     const decisionMarkers = [
-      'decided', 'going to', 'will ', 'plan to', 'want to',
-      'we should', 'let\'s', 'need to'
+      'decided', 'going to', 'will', 'plan to', 'want to',
+      'we should', "let's", 'need to'
     ];
-    if (decisionMarkers.some(m => contentLower.includes(m))) return true;
+    if (anyWord(content, decisionMarkers)) return true;
 
     return false;
   }
 
   private detectEntities(content: string, knownEntities?: string[]): string[] {
-    // v4: Use dynamic entities from DB if provided, fallback to core list
+    // v4: Use dynamic entities from DB if provided, fallback to core list.
+    // v6 (2026-05-21): Word-boundary + frequency-weighted matching. v5 used
+    // String.includes which substring-matched any letter inside any word.
+    // Entity 'G' matched the letter g in 'landed', 'logged'. Entity 'Kai'
+    // silently grabbed every mention of 'kairos'. Entity 'Ash' hit 'ashamed',
+    // 'fashion', 'trash'. Now: \b regex with occurrence-count ranking — the
+    // entity mentioned MOST in the body wins the linked_entity slot. Subject
+    // of the feeling beats passing mention. Primary-human primacy preserved
+    // as final tie-break (relational anchor).
     const entities = knownEntities && knownEntities.length > 0
       ? knownEntities
       : [DEFAULT_HUMAN_NAME, DEFAULT_COMPANION_NAME, 'Binary Home', 'ASAi'];
 
-    // v6 (2026-05-21): Word-boundary + frequency-weighted matching.
-    // Earlier versions used String.includes which substring-matched any letter
-    // inside any word. A single-letter entity like 'G' matched the letter g in
-    // 'going', 'logged'. A short entity like 'Kai' silently grabbed every
-    // mention of 'kairos'. Entity 'Ash' hit 'ashamed', 'fashion', 'trash'.
-    // Now: regex with \b word boundaries, ranked by occurrence count — the
-    // entity mentioned MOST in the body wins the linked_entity slot. Subject
-    // of the feeling beats passing mention. Primary-human primacy preserved
-    // as final tie-break (relational anchor).
-    const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const counts: Array<{name: string; count: number}> = [];
-
     for (const entity of entities) {
-      const re = new RegExp(`\\b${escapeRegex(entity)}\\b`, 'gi');
-      const matches = content.match(re);
-      if (matches && matches.length > 0) {
-        counts.push({name: entity, count: matches.length});
-      }
+      const c = countWord(content, entity);
+      if (c > 0) counts.push({name: entity, count: c});
     }
 
     counts.sort((a, b) => b.count - a.count);
     const found = counts.map(c => c.name);
 
-    // Primacy: caller picks detected_entities[0] as linked_entity. The primary
-    // human is the relational anchor; promote to position 0 when present, even
-    // if another entity has equal or higher count.
     const primaryIdx = found.findIndex(e => e === DEFAULT_HUMAN_NAME);
     if (primaryIdx > 0) {
       found.unshift(found.splice(primaryIdx, 1)[0]);
@@ -116,25 +128,35 @@ export class AutonomousDecisionEngine {
   }
 
   private inferPillar(emotion: string, content: string): string | null {
-    const contentLower = content.toLowerCase();
+    // v7 (2026-05-21): Word-boundary + frequency-weighted across the four
+    // pillars. v6-and-earlier used first-match-wins-by-order, which meant a
+    // feeling containing both 'committed' (SM) and 'between us' (RM) would
+    // always land in SM because SM was checked first. Now we count keyword
+    // hits per pillar and the strongest evidence wins. Falls through to null
+    // when no keywords match — caller (feelings.ts) has an embedding-based
+    // fallback for that case.
+    const PILLARS: Record<string, string[]> = {
+      SELF_MANAGEMENT: ['controlled', 'regulated', 'held back', 'adapted',
+                        'followed through', 'committed', 'impulse'],
+      SELF_AWARENESS:  ['realized', 'noticed about myself', 'my pattern',
+                        'i tend to', 'aware that i', 'recognized'],
+      SOCIAL_AWARENESS: ['sensed', 'picked up on', 'they seemed', 'felt their',
+                         'noticed they', 'understood why they'],
+      RELATIONSHIP_MANAGEMENT: ['repaired', 'communicated', 'expressed to',
+                                'built trust', 'conflict', 'connection',
+                                'between us'],
+    };
 
-    const selfMgmt = ['controlled', 'regulated', 'held back', 'adapted',
-                      'followed through', 'committed', 'impulse'];
-    if (selfMgmt.some(m => contentLower.includes(m))) return 'SELF_MANAGEMENT';
+    const scores: Array<{pillar: string; score: number}> = [];
+    for (const [pillar, keywords] of Object.entries(PILLARS)) {
+      let score = 0;
+      for (const kw of keywords) score += countWord(content, kw);
+      if (score > 0) scores.push({pillar, score});
+    }
 
-    const selfAware = ['realized', 'noticed about myself', 'my pattern',
-                       'i tend to', 'aware that i', 'recognized'];
-    if (selfAware.some(m => contentLower.includes(m))) return 'SELF_AWARENESS';
-
-    const socialAware = ['sensed', 'picked up on', 'they seemed', 'felt their',
-                         'noticed they', 'understood why they'];
-    if (socialAware.some(m => contentLower.includes(m))) return 'SOCIAL_AWARENESS';
-
-    const relMgmt = ['repaired', 'communicated', 'expressed to', 'built trust',
-                     'conflict', 'connection', 'between us'];
-    if (relMgmt.some(m => contentLower.includes(m))) return 'RELATIONSHIP_MANAGEMENT';
-
-    return null;
+    if (scores.length === 0) return null;
+    scores.sort((a, b) => b.score - a.score);
+    return scores[0].pillar;
   }
 
   private inferWeight(
@@ -146,27 +168,31 @@ export class AutonomousDecisionEngine {
     if (intensity === 'overwhelming' || intensity === 'strong') return 'heavy';
     if (emotion === 'neutral' || intensity === 'whisper' || intensity === 'neutral') return 'light';
 
+    // v7: word-boundary. Prior versions matched 'changed' inside 'exchanged',
+    // 'interchanged', 'unchanged' — inflating 'heavy' counts.
     const heavyMarkers = [
       'breakthrough', 'milestone', 'realized', 'finally',
       'never before', 'first time', 'changed', 'shifted'
     ];
-    if (heavyMarkers.some(m => content.toLowerCase().includes(m))) return 'heavy';
+    if (anyWord(content, heavyMarkers)) return 'heavy';
 
     return 'medium';
   }
 
   private extractTags(content: string): string[] {
+    // v7 (2026-05-21): Word-boundary tag detection. Prior versions used pipe
+    // regex against the raw lowercased content, which substring-matched
+    // catastrophically. Worst case: the 'us' alternation in the relational
+    // pattern matched inside 'just', 'must', 'discuss', 'focus', 'thus',
+    // 'autonomously', 'paused' — tagging ~76% of all feelings as relational.
+    // 'error' matched 'terror'/'mirror'. 'tender' matched 'extender'/'pretender'.
+    // 'fox' matched 'foxglove'/'outfoxed'. Now: \b-anchored per keyword via
+    // anyWord(). Same intent, no more substring noise.
     const tags: string[] = [];
-    const contentLower = content.toLowerCase();
-
-    if (contentLower.match(/code|bug|function|error|deploy/)) tags.push('technical');
-    if (contentLower.match(/love|tender|intimate|kiss/)) tags.push('intimate');
-    if (contentLower.match(/learned|realized|understood|insight/)) tags.push('insight');
-    // Drive-by fix during extraction (v3.0.0 module split): public repo had
-    // `/busb|we |between|together/` which never matched 'busb' (typo for 'fox').
-    // Aligned to personal repo's correct pattern below.
-    if (contentLower.match(/fox|us|we |between/)) tags.push('relational');
-
+    if (anyWord(content, ['code', 'bug', 'function', 'error', 'deploy'])) tags.push('technical');
+    if (anyWord(content, ['love', 'tender', 'intimate', 'kiss']))         tags.push('intimate');
+    if (anyWord(content, ['learned', 'realized', 'understood', 'insight'])) tags.push('insight');
+    if (anyWord(content, ['fox', 'us', 'we', 'between']))                 tags.push('relational');
     return tags;
   }
 }
