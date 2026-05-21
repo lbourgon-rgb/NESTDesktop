@@ -80,19 +80,33 @@ export class AutonomousDecisionEngine {
     const entities = knownEntities && knownEntities.length > 0
       ? knownEntities
       : [DEFAULT_HUMAN_NAME, DEFAULT_COMPANION_NAME, 'Binary Home', 'ASAi'];
-    const found: string[] = [];
+
+    // v6 (2026-05-21): Word-boundary + frequency-weighted matching.
+    // Earlier versions used String.includes which substring-matched any letter
+    // inside any word. A single-letter entity like 'G' matched the letter g in
+    // 'going', 'logged'. A short entity like 'Kai' silently grabbed every
+    // mention of 'kairos'. Entity 'Ash' hit 'ashamed', 'fashion', 'trash'.
+    // Now: regex with \b word boundaries, ranked by occurrence count — the
+    // entity mentioned MOST in the body wins the linked_entity slot. Subject
+    // of the feeling beats passing mention. Primary-human primacy preserved
+    // as final tie-break (relational anchor).
+    const escapeRegex = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const counts: Array<{name: string; count: number}> = [];
 
     for (const entity of entities) {
-      if (content.toLowerCase().includes(entity.toLowerCase())) {
-        found.push(entity);
+      const re = new RegExp(`\\b${escapeRegex(entity)}\\b`, 'gi');
+      const matches = content.match(re);
+      if (matches && matches.length > 0) {
+        counts.push({name: entity, count: matches.length});
       }
     }
 
-    // Primacy: caller picks detected_entities[0] as linked_entity. Without this
-    // reorder, [0] is whatever the entities table returned first — typically
-    // alphabetical/by-id ordering, which means a secondary person mentioned
-    // alongside the primary human gets the relational anchor instead. Promote
-    // DEFAULT_HUMAN_NAME to position 0 when present.
+    counts.sort((a, b) => b.count - a.count);
+    const found = counts.map(c => c.name);
+
+    // Primacy: caller picks detected_entities[0] as linked_entity. The primary
+    // human is the relational anchor; promote to position 0 when present, even
+    // if another entity has equal or higher count.
     const primaryIdx = found.findIndex(e => e === DEFAULT_HUMAN_NAME);
     if (primaryIdx > 0) {
       found.unshift(found.splice(primaryIdx, 1)[0]);
