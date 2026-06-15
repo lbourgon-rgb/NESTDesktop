@@ -178,7 +178,7 @@ A practical shortlist to test first (open, capable, affordable; slugs current Ju
 
 These are the reference defaults in the gateway. Yours may differ if you (or whoever set up your fork) changed them — that's allowed, that's the point.
 
-- **Default chat model:** `qwen/qwen3.7-plus` (the older `qwen/qwen3.6-plus` default was retired on OpenRouter — the "plus" line jumped 3.5 → 3.7. If you're on an older gateway, set `CHAT_MODEL` so you don't fall through to a dead slug.)
+- **Default chat model:** `qwen/qwen3.7-plus` (the current Qwen "plus" tier — newer and a touch cheaper than its predecessor `qwen/qwen3.6-plus`, which also still works fine. Set `CHAT_MODEL` to use whatever model you like.)
 - **NESTsoul + health-synthesis model:** follows `CHAT_MODEL` by default; override with `NESTSOUL_MODEL` / `FOX_SYNTH_MODEL`. (Hardcoded to Claude Sonnet 4.5 on pre-mid-2026 gateways.)
 - **Max tool rounds per reply:** `5`
 - **Default reply length:** `4096` tokens
