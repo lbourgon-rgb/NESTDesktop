@@ -315,7 +315,10 @@ interface ChatRequest {
 }
 
 const MAX_TOOL_ROUNDS = 5
-const DEFAULT_MODEL = 'qwen/qwen3.6-plus'
+// 2026-06: qwen/qwen3.6-plus was retired on OpenRouter (the "plus" line went 3.5 → 3.7).
+// Defaulting to the current equivalent so a fresh deploy with no CHAT_MODEL set doesn't
+// fall through to a dead slug.
+const DEFAULT_MODEL = 'qwen/qwen3.7-plus'
 const DEFAULT_MAX_TOKENS = 4096
 const DEFAULT_TEMPERATURE = 0.8
 
@@ -581,7 +584,7 @@ export async function handleChat(request: Request, env: Env, ctx?: ExecutionCont
       // Stream final message
       sendSSE(streamController, 'message', { content: fullContent })
       sendSSE(streamController, 'done', {})
-      streamController.close()
+      ;(streamController as ReadableStreamDefaultController<Uint8Array>).close()
 
       return new Response(responseStream, {
         headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', 'Connection': 'keep-alive', ...CORS },
@@ -597,7 +600,7 @@ export async function handleChat(request: Request, env: Env, ctx?: ExecutionCont
   } catch (error: any) {
     if (shouldStream && streamController) {
       sendSSE(streamController, 'error', { error: error.message })
-      streamController.close()
+      ;(streamController as ReadableStreamDefaultController<Uint8Array>).close()
       return new Response(responseStream, {
         headers: { 'Content-Type': 'text/event-stream', ...CORS },
       })
